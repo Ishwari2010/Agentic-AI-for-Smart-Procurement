@@ -1,28 +1,31 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional, Dict, Any
 
 
-# -----------------------------
-# Item Schema
-# -----------------------------
+# ============================================================
+# Procurement Item
+# ============================================================
+
 class ProcurementItem(BaseModel):
     description: str
     quantity: int
     estimated_cost: float
 
 
-# -----------------------------
-# Gemini Extraction Schema
-# -----------------------------
+# ============================================================
+# Gemini Extraction
+# ============================================================
+
 class ProcurementExtraction(BaseModel):
     requester_name: str
     items: List[ProcurementItem]
     total_estimated_cost: float
 
 
-# -----------------------------
-# Database Response Schemas
-# -----------------------------
+# ============================================================
+# Procurement Item Response
+# ============================================================
+
 class ProcurementItemResponse(ProcurementItem):
     id: int
 
@@ -30,11 +33,36 @@ class ProcurementItemResponse(ProcurementItem):
         from_attributes = True
 
 
+# ============================================================
+# Procurement Request Response
+# ============================================================
+
 class ProcurementRequestResponse(BaseModel):
     id: int
     requester_name: str
     total_estimated_cost: float
     items: List[ProcurementItemResponse]
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================================
+# Document Processing Response
+# ============================================================
+
+class DocumentProcessingResponse(BaseModel):
+    id: int
+    filename: str
+    status: str
+
+    ocr_text: Optional[str] = None
+
+    structured_data: Optional[Dict[str, Any]] = None
+
+    request_id: Optional[int] = None
+
+    error_message: Optional[str] = None
 
     class Config:
         from_attributes = True

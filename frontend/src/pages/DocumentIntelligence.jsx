@@ -180,6 +180,7 @@ function DocumentIntelligence() {
           response.data.filename,
         status: "queued",
         ocr_status: "pending",
+        docling_status: "pending",
         gemini_status: "pending",
         ocr_text: null,
         structured_data: null,
@@ -239,6 +240,19 @@ function DocumentIntelligence() {
       result &&
       (
         result.ocr_status === "completed" ||
+        result.docling_status === "completed" ||
+        result.gemini_status === "completed" ||
+        result.status === "completed"
+      )
+    );
+  };
+
+  const isDoclingCompleted = () => {
+    return (
+      result &&
+      (
+        result.docling_status === "completed" ||
+        result.gemini_status === "completed" ||
         result.status === "completed"
       )
     );
@@ -553,7 +567,43 @@ function DocumentIntelligence() {
           <div className="pipeline-line"></div>
 
 
-          {/* STEP 4 — AI EXTRACTION */}
+          {/* STEP 4 — DOCLING */}
+
+          <div
+            className={`pipeline-step ${
+              isDoclingCompleted()
+                ? "completed"
+                : ""
+            }`}
+          >
+
+            <div className="step-circle">
+
+              {isDoclingCompleted()
+                ? "✓"
+                : "4"}
+
+            </div>
+
+            <div>
+
+              <strong>
+                Docling
+              </strong>
+
+              <span>
+                Document structure
+              </span>
+
+            </div>
+
+          </div>
+
+
+          <div className="pipeline-line"></div>
+
+
+          {/* STEP 5 — AI EXTRACTION */}
 
           <div
             className={`pipeline-step ${
@@ -567,7 +617,7 @@ function DocumentIntelligence() {
 
               {isGeminiCompleted()
                 ? "✓"
-                : "4"}
+                : "5"}
 
             </div>
 
@@ -589,7 +639,7 @@ function DocumentIntelligence() {
           <div className="pipeline-line"></div>
 
 
-          {/* STEP 5 — DATABASE */}
+          {/* STEP 6 — DATABASE */}
 
           <div
             className={`pipeline-step ${
@@ -603,7 +653,7 @@ function DocumentIntelligence() {
 
               {isDatabaseCompleted()
                 ? "✓"
-                : "5"}
+                : "6"}
 
             </div>
 
@@ -740,6 +790,20 @@ function DocumentIntelligence() {
                 <div>
 
                   <span>
+                    Docling
+                  </span>
+
+                  <strong>
+                    {result.docling_status ??
+                      "pending"}
+                  </strong>
+
+                </div>
+
+
+                <div>
+
+                  <span>
                     Gemini
                   </span>
 
@@ -814,6 +878,22 @@ function DocumentIntelligence() {
 
                     <p>
                       Tesseract OCR completed
+                    </p>
+
+                  </div>
+
+                )}
+
+
+                {result.docling_status ===
+                  "completed" && (
+
+                  <div>
+
+                    <span className="activity-dot"></span>
+
+                    <p>
+                      Docling document structure extracted
                     </p>
 
                   </div>

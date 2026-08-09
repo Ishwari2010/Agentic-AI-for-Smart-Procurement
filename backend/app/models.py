@@ -129,6 +129,12 @@ class DocumentProcessing(Base):
         default="pending"
     )
 
+    docling_status = Column(
+        String(50),
+        nullable=False,
+        default="pending"
+    )
+
     gemini_status = Column(
         String(50),
         nullable=False,

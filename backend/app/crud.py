@@ -152,6 +152,32 @@ def update_ocr_status(
 
     return processing
 
+# ============================================================
+# Update DoclingStatus
+# ============================================================
+
+def update_docling_status(
+    db: Session,
+    processing_id: int,
+    status: str
+):
+    """
+    Updates Docling document-structure processing status.
+    """
+
+    processing = get_document_processing(
+        db,
+        processing_id
+    )
+
+    if processing:
+        processing.docling_status = status
+
+        db.commit()
+        db.refresh(processing)
+
+    return processing
+
 
 # ============================================================
 # Update Gemini Status
@@ -314,6 +340,7 @@ def reset_document_processing(
 
     processing.status = "queued"
     processing.ocr_status = "pending"
+    processing.docling_status = "pending"
     processing.gemini_status = "pending"
 
     processing.ocr_text = None

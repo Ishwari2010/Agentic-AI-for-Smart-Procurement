@@ -255,10 +255,34 @@ for message in consumer:
                 "using Docling..."
             )
 
+            # ------------------------------------------------
+            # Mark Docling as Processing
+            # ------------------------------------------------
+
+            crud.update_docling_status(
+                db,
+                processing_id,
+                "processing"
+            )
+
+            # ------------------------------------------------
+            # Run Docling
+            # ------------------------------------------------
+
             document_structure = (
                 extract_document_structure(
                     file_path
                 )
+            )
+
+            # ------------------------------------------------
+            # Mark Docling as Completed
+            # ------------------------------------------------
+
+            crud.update_docling_status(
+                db,
+                processing_id,
+                "completed"
             )
 
             print(
@@ -286,6 +310,16 @@ for message in consumer:
             print(
                 f"Docling processing failed: "
                 f"{docling_error}"
+            )
+
+            # ------------------------------------------------
+            # Mark Docling as Failed
+            # ------------------------------------------------
+
+            crud.update_docling_status(
+                db,
+                processing_id,
+                "failed"
             )
 
             print(

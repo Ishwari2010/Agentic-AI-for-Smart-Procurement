@@ -56,6 +56,10 @@ class DocumentProcessingResponse(BaseModel):
     filename: str
     status: str
 
+    ocr_status: str
+    docling_status: str
+    gemini_status: str
+
     ocr_text: Optional[str] = None
 
     structured_data: Optional[Dict[str, Any]] = None

@@ -38,7 +38,7 @@ function DocumentIntelligence() {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         const response = await axios.get(
-          `${API_URL}/processing/${id}`
+          `${API_URL}/documents/${id}`
         );
 
         const data = response.data;

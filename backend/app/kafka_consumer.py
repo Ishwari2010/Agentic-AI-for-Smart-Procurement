@@ -6,6 +6,7 @@ from kafka import KafkaConsumer
 from .database import SessionLocal
 from . import schemas, crud
 from .ocr import extract_text
+from .document_structure import extract_document_structure
 from .llm.gemini_client import extract_information
 
 
@@ -16,6 +17,10 @@ from .llm.gemini_client import extract_information
 KAFKA_SERVER = "localhost:9092"
 KAFKA_TOPIC = "invoice-topic"
 
+
+# ============================================================
+# Kafka Consumer
+# ============================================================
 
 consumer = KafkaConsumer(
     KAFKA_TOPIC,
@@ -28,6 +33,10 @@ consumer = KafkaConsumer(
     )
 )
 
+
+# ============================================================
+# Startup Message
+# ============================================================
 
 print("========================================")
 print("Document Intelligence Agent started.")
@@ -48,7 +57,7 @@ for message in consumer:
     try:
 
         # ----------------------------------------------------
-        # Get Kafka event
+        # Get Kafka Event
         # ----------------------------------------------------
 
         event = message.value
@@ -57,11 +66,15 @@ for message in consumer:
         print("Kafka message received")
         print("========================================")
 
-        print(json.dumps(event, indent=2))
-
+        print(
+            json.dumps(
+                event,
+                indent=2
+            )
+        )
 
         # ----------------------------------------------------
-        # Check event type
+        # Check Event Type
         # ----------------------------------------------------
 
         if event.get("event") != "invoice.received":
@@ -70,15 +83,13 @@ for message in consumer:
 
             continue
 
-
         # ----------------------------------------------------
-        # Get event information
+        # Get Event Information
         # ----------------------------------------------------
 
         processing_id = event.get("processing_id")
         file_path = event.get("file_path")
         filename = event.get("filename")
-
 
         if not processing_id or not file_path or not filename:
 
@@ -86,13 +97,16 @@ for message in consumer:
 
             continue
 
+        print(
+            f"Processing ID: {processing_id}"
+        )
 
-        print(f"Processing ID: {processing_id}")
-        print(f"Processing invoice: {filename}")
-
+        print(
+            f"Processing invoice: {filename}"
+        )
 
         # ----------------------------------------------------
-        # Update overall status
+        # Update Overall Processing Status
         # ----------------------------------------------------
 
         crud.update_processing_status(
@@ -101,9 +115,8 @@ for message in consumer:
             "processing"
         )
 
-
         # ----------------------------------------------------
-        # Check file exists
+        # Check File Exists
         # ----------------------------------------------------
 
         if not os.path.exists(file_path):
@@ -122,7 +135,6 @@ for message in consumer:
 
             continue
 
-
         # ====================================================
         # OCR PROCESSING
         # ====================================================
@@ -131,7 +143,9 @@ for message in consumer:
         print("OCR PROCESSING")
         print("========================================")
 
-        # Mark OCR as processing
+        # ----------------------------------------------------
+        # Mark OCR as Processing
+        # ----------------------------------------------------
 
         crud.update_ocr_status(
             db,
@@ -139,13 +153,46 @@ for message in consumer:
             "processing"
         )
 
+        # ----------------------------------------------------
+        # Tesseract + OpenCV
+        # ----------------------------------------------------
 
-        print("Running Tesseract OCR...")
+        print(
+            "Running Tesseract OCR with "
+            "OpenCV preprocessing..."
+        )
 
-        ocr_text = extract_text(file_path)
+        try:
 
+            ocr_text = extract_text(
+                file_path
+            )
 
-        # Check whether OCR returned anything
+        except Exception as ocr_error:
+
+            error_message = (
+                f"Tesseract OCR failed: {str(ocr_error)}"
+            )
+
+            print(error_message)
+
+            crud.update_ocr_status(
+                db,
+                processing_id,
+                "failed"
+            )
+
+            crud.save_processing_error(
+                db,
+                processing_id,
+                error_message
+            )
+
+            continue
+
+        # ----------------------------------------------------
+        # Check OCR Result
+        # ----------------------------------------------------
 
         if not ocr_text or not ocr_text.strip():
 
@@ -169,8 +216,9 @@ for message in consumer:
 
             continue
 
-
-        # Save OCR result and mark completed
+        # ----------------------------------------------------
+        # Save OCR Result
+        # ----------------------------------------------------
 
         crud.update_ocr_status(
             db,
@@ -179,14 +227,79 @@ for message in consumer:
             ocr_text
         )
 
-
-        print("OCR completed successfully.")
+        print(
+            "OCR completed successfully."
+        )
 
         print("\nOCR TEXT:")
         print("----------------------------------------")
         print(ocr_text)
         print("----------------------------------------")
 
+        # ====================================================
+        # DOCLING PROCESSING
+        # ====================================================
+
+        print("\n========================================")
+        print(
+            "DOCLING DOCUMENT STRUCTURE PROCESSING"
+        )
+        print("========================================")
+
+        document_structure = ""
+
+        try:
+
+            print(
+                "Extracting document structure "
+                "using Docling..."
+            )
+
+            document_structure = (
+                extract_document_structure(
+                    file_path
+                )
+            )
+
+            print(
+                "Docling processing completed."
+            )
+
+            print(
+                "\nDOCLING DOCUMENT STRUCTURE:"
+            )
+
+            print(
+                "----------------------------------------"
+            )
+
+            print(
+                document_structure
+            )
+
+            print(
+                "----------------------------------------"
+            )
+
+        except Exception as docling_error:
+
+            print(
+                f"Docling processing failed: "
+                f"{docling_error}"
+            )
+
+            print(
+                "Continuing with OCR text only."
+            )
+
+            # ------------------------------------------------
+            # Docling is a supporting stage.
+            #
+            # If it fails, Gemini can still use the
+            # Tesseract OCR text.
+            # ------------------------------------------------
+
+            document_structure = ""
 
         # ====================================================
         # GEMINI PROCESSING
@@ -196,8 +309,9 @@ for message in consumer:
         print("GEMINI PROCESSING")
         print("========================================")
 
-
-        # Mark Gemini as processing
+        # ----------------------------------------------------
+        # Mark Gemini as Processing
+        # ----------------------------------------------------
 
         crud.update_gemini_status(
             db,
@@ -205,14 +319,66 @@ for message in consumer:
             "processing"
         )
 
-
-        print("Sending OCR text to Gemini...")
-
-
-        structured_data = extract_information(
-            ocr_text
+        print(
+            "Sending OCR text and Docling "
+            "document structure to Gemini..."
         )
 
+        # ----------------------------------------------------
+        # Gemini Extraction
+        # ----------------------------------------------------
+
+        try:
+
+            structured_data = extract_information(
+                ocr_text,
+                document_structure
+            )
+
+        except Exception as gemini_error:
+
+            error_message = (
+                f"Gemini processing failed: "
+                f"{str(gemini_error)}"
+            )
+
+            print("\n========================================")
+            print("GEMINI PROCESSING FAILED")
+            print("========================================")
+            print(error_message)
+            print("========================================")
+
+            # ------------------------------------------------
+            # IMPORTANT:
+            #
+            # Do NOT create a procurement request when
+            # Gemini fails.
+            #
+            # This handles:
+            # - 429 quota errors
+            # - API errors
+            # - invalid responses
+            # - network errors
+            # - authentication errors
+            # ------------------------------------------------
+
+            crud.update_gemini_status(
+                db,
+                processing_id,
+                "failed"
+            )
+
+            crud.save_processing_error(
+                db,
+                processing_id,
+                error_message
+            )
+
+            continue
+
+        # ----------------------------------------------------
+        # Check Gemini Result
+        # ----------------------------------------------------
 
         if not structured_data:
 
@@ -236,8 +402,9 @@ for message in consumer:
 
             continue
 
-
-        # Save Gemini result and mark completed
+        # ----------------------------------------------------
+        # Save Gemini Result
+        # ----------------------------------------------------
 
         crud.update_gemini_status(
             db,
@@ -246,11 +413,9 @@ for message in consumer:
             structured_data
         )
 
-
         print(
             "Gemini extraction completed."
         )
-
 
         print("\nSTRUCTURED DATA:")
         print("----------------------------------------")
@@ -263,42 +428,80 @@ for message in consumer:
             )
         )
 
-        print("----------------------------------------")
-
+        print(
+            "----------------------------------------"
+        )
 
         # ====================================================
         # PYDANTIC VALIDATION
         # ====================================================
 
-        print("\nValidating extracted data...")
-
-
-        validated_data = (
-            schemas.ProcurementExtraction(
-                **structured_data
-            )
+        print(
+            "\nValidating extracted data..."
         )
 
+        try:
+
+            validated_data = (
+                schemas.ProcurementExtraction(
+                    **structured_data
+                )
+            )
+
+        except Exception as validation_error:
+
+            error_message = (
+                "Structured data validation failed: "
+                f"{str(validation_error)}"
+            )
+
+            print(error_message)
+
+            crud.save_processing_error(
+                db,
+                processing_id,
+                error_message
+            )
+
+            continue
 
         print(
             "Data validation completed."
         )
 
-
         # ====================================================
         # SAVE PROCUREMENT REQUEST
         # ====================================================
 
-        print("\nSaving procurement request...")
-
-
-        db_request = (
-            crud.create_procurement_request(
-                db,
-                validated_data
-            )
+        print(
+            "\nSaving procurement request..."
         )
 
+        try:
+
+            db_request = (
+                crud.create_procurement_request(
+                    db,
+                    validated_data
+                )
+            )
+
+        except Exception as db_error:
+
+            error_message = (
+                "Failed to save procurement request: "
+                f"{str(db_error)}"
+            )
+
+            print(error_message)
+
+            crud.save_processing_error(
+                db,
+                processing_id,
+                error_message
+            )
+
+            continue
 
         print(
             "Invoice saved to PostgreSQL."
@@ -308,49 +511,63 @@ for message in consumer:
             f"Request ID: {db_request.id}"
         )
 
-
         # ====================================================
         # SAVE FINAL PROCESSING RESULT
         # ====================================================
 
         crud.save_processing_result(
-
             db=db,
-
             processing_id=processing_id,
-
             ocr_text=ocr_text,
-
             structured_data=structured_data,
-
             request_id=db_request.id
         )
-
 
         # ====================================================
         # SUCCESS
         # ====================================================
 
-        print("\n========================================")
         print(
-            "INVOICE PROCESSING COMPLETED SUCCESSFULLY"
+            "\n========================================"
         )
-        print("========================================")
 
+        print(
+            "INVOICE PROCESSING COMPLETED "
+            "SUCCESSFULLY"
+        )
+
+        print(
+            "========================================"
+        )
+
+    # ========================================================
+    # UNEXPECTED ERROR
+    # ========================================================
 
     except Exception as e:
 
-        print("\n========================================")
-        print("ERROR PROCESSING INVOICE")
-        print("========================================")
+        print(
+            "\n========================================"
+        )
 
-        print(str(e))
+        print(
+            "ERROR PROCESSING INVOICE"
+        )
 
-        print("========================================")
+        print(
+            "========================================"
+        )
 
+        print(
+            str(e)
+        )
+
+        print(
+            "========================================"
+        )
 
         # ----------------------------------------------------
-        # Mark processing as failed
+        # Save Failure Information
         # ----------------------------------------------------
 
         try:
@@ -370,6 +587,9 @@ for message in consumer:
                 f"{db_error}"
             )
 
+    # ========================================================
+    # CLOSE DATABASE SESSION
+    # ========================================================
 
     finally:
 

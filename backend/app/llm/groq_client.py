@@ -2,7 +2,7 @@ import os
 import json
 
 from dotenv import load_dotenv
-from google import genai
+from openai import OpenAI
 
 
 # ============================================================
@@ -13,16 +13,17 @@ load_dotenv()
 
 
 # ============================================================
-# Initialize Gemini Client
+# Initialize Groq Client
 # ============================================================
 
-client = genai.Client(
-    api_key=os.getenv("GEMINI_API_KEY")
+client = OpenAI(
+    api_key=os.getenv("GROQ_API_KEY"),
+    base_url="https://api.groq.com/openai/v1"
 )
 
 
 # ============================================================
-# Gemini Information Extraction
+# Groq Information Extraction
 # ============================================================
 
 def extract_information(
@@ -31,7 +32,7 @@ def extract_information(
 ):
     """
     Sends both Tesseract OCR text and Docling document
-    structure to Gemini and returns structured procurement
+    structure to Groq and returns structured procurement
     information.
     """
 
@@ -126,6 +127,26 @@ IMPORTANT EXTRACTION RULES
 14. IMPORTANT:
     Do NOT treat table columns as independent lists.
 
+    For example, if an invoice contains:
+
+    Description:
+    Item A
+    Item B
+    Item C
+
+    Quantity:
+    2
+    5
+    1
+
+    Amount:
+    1000
+    2500
+    800
+
+    The values must remain associated with their
+    corresponding item.
+
 15. Use the table structure from Docling to help determine
     row and column relationships.
 
@@ -207,17 +228,22 @@ Return ONLY the JSON.
 """
 
     # ========================================================
-    # Call Gemini
+    # Call Groq
     # ========================================================
 
     try:
 
-        response = client.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=prompt
+        print(
+            "Sending OCR text and Docling "
+            "document structure to Groq..."
         )
 
-        result = response.text.strip()
+        response = client.responses.create(
+            model="llama-3.3-70b-versatile",
+            input=prompt
+        )
+
+        result = response.output_text.strip()
 
         # ----------------------------------------------------
         # Remove Markdown Code Fences
@@ -247,10 +273,10 @@ Return ONLY the JSON.
 
     except Exception as e:
 
-        print("Gemini Error:", e)
+        print("Groq Error:", e)
 
         # IMPORTANT:
-        # Propagate the error so llm_client.py can mark
-        # processing as failed.
+        # Propagate the error so llm_client.py can
+        # automatically fall back to Gemini.
 
         raise

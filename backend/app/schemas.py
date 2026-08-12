@@ -13,12 +13,18 @@ class ProcurementItem(BaseModel):
 
 
 # ============================================================
-# Gemini Extraction
+# LLM Extraction
 # ============================================================
 
 class ProcurementExtraction(BaseModel):
     requester_name: str
+
+    address: Optional[str] = None
+
+    phone_number: Optional[str] = None
+
     items: List[ProcurementItem]
+
     total_estimated_cost: float
 
 
@@ -39,8 +45,15 @@ class ProcurementItemResponse(ProcurementItem):
 
 class ProcurementRequestResponse(BaseModel):
     id: int
+
     requester_name: str
+
+    address: Optional[str] = None
+
+    phone_number: Optional[str] = None
+
     total_estimated_cost: float
+
     items: List[ProcurementItemResponse]
 
     class Config:
@@ -53,11 +66,15 @@ class ProcurementRequestResponse(BaseModel):
 
 class DocumentProcessingResponse(BaseModel):
     id: int
+
     filename: str
+
     status: str
 
     ocr_status: str
+
     docling_status: str
+
     gemini_status: str
 
     ocr_text: Optional[str] = None

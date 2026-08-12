@@ -7,7 +7,7 @@ from .database import SessionLocal
 from . import schemas, crud
 from .ocr import extract_text
 from .document_structure import extract_document_structure
-from .llm.gemini_client import extract_information
+from .llm.llm_client import extract_information
 
 
 # ============================================================

@@ -34,6 +34,16 @@ class ProcurementRequest(Base):
         nullable=False
     )
 
+    address = Column(
+        Text,
+        nullable=True
+    )
+
+    phone_number = Column(
+        String(50),
+        nullable=True
+    )
+
     total_estimated_cost = Column(
         Numeric(12, 2),
         nullable=False

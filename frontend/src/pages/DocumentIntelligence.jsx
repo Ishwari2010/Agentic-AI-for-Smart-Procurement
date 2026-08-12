@@ -627,9 +627,7 @@ function DocumentIntelligence() {
                 AI Extraction
               </strong>
 
-              <span>
-                Gemini processing
-              </span>
+              <span>Groq → Gemini fallback</span>
 
             </div>
 

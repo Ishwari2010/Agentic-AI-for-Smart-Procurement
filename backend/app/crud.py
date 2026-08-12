@@ -13,19 +13,42 @@ def create_procurement_request(
 ):
     """
     Saves one procurement request and all extracted items.
+
+    The total estimated cost is calculated from the extracted
+    item costs instead of relying on the LLM's total.
     """
 
+    # --------------------------------------------------------
+    # Calculate total from all extracted items
+    # --------------------------------------------------------
+
+    calculated_total = sum(
+        item.estimated_cost
+        for item in data.items
+    )
+
+    # --------------------------------------------------------
     # Create main procurement request
+    # --------------------------------------------------------
+
     db_request = models.ProcurementRequest(
         requester_name=data.requester_name,
-        total_estimated_cost=data.total_estimated_cost
+
+        address=data.address,
+
+        phone_number=data.phone_number,
+
+        total_estimated_cost=calculated_total
     )
 
     db.add(db_request)
     db.commit()
     db.refresh(db_request)
 
+    # --------------------------------------------------------
     # Save extracted items
+    # --------------------------------------------------------
+
     for item in data.items:
 
         db_item = models.ProcurementItem(
@@ -61,6 +84,7 @@ def create_document_processing(
         file_path=file_path,
         status="queued",
         ocr_status="pending",
+        docling_status="pending",
         gemini_status="pending"
     )
 
@@ -152,8 +176,9 @@ def update_ocr_status(
 
     return processing
 
+
 # ============================================================
-# Update DoclingStatus
+# Update Docling Status
 # ============================================================
 
 def update_docling_status(
@@ -171,6 +196,7 @@ def update_docling_status(
     )
 
     if processing:
+
         processing.docling_status = status
 
         db.commit()
@@ -190,7 +216,7 @@ def update_gemini_status(
     structured_data: dict = None
 ):
     """
-    Updates Gemini processing status and optionally
+    Updates LLM processing status and optionally
     stores the structured extraction result.
     """
 
@@ -238,6 +264,8 @@ def save_processing_result(
 
         processing.ocr_status = "completed"
 
+        processing.docling_status = "completed"
+
         processing.gemini_status = "completed"
 
         processing.ocr_text = ocr_text
@@ -283,6 +311,7 @@ def save_processing_error(
         db.refresh(processing)
 
     return processing
+
 
 # ============================================================
 # Get All Document Processing Records
@@ -339,13 +368,19 @@ def reset_document_processing(
         return None
 
     processing.status = "queued"
+
     processing.ocr_status = "pending"
+
     processing.docling_status = "pending"
+
     processing.gemini_status = "pending"
 
     processing.ocr_text = None
+
     processing.structured_data = None
+
     processing.request_id = None
+
     processing.error_message = None
 
     db.commit()

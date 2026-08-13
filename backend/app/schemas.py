@@ -25,6 +25,10 @@ class ProcurementExtraction(BaseModel):
 
     items: List[ProcurementItem]
 
+    # IMPORTANT:
+    # This represents the FINAL invoice total/payable amount.
+    # It may include GST, taxes, discounts, shipping charges,
+    # rounding, or other invoice-level adjustments.
     total_estimated_cost: float
 
 
@@ -52,6 +56,7 @@ class ProcurementRequestResponse(BaseModel):
 
     phone_number: Optional[str] = None
 
+    # FINAL invoice amount
     total_estimated_cost: float
 
     items: List[ProcurementItemResponse]
@@ -69,6 +74,18 @@ class DocumentProcessingResponse(BaseModel):
 
     filename: str
 
+    # --------------------------------------------------------
+    # MinIO
+    # --------------------------------------------------------
+
+    minio_status: str
+
+    minio_object_name: Optional[str] = None
+
+    # --------------------------------------------------------
+    # Processing Status
+    # --------------------------------------------------------
+
     status: str
 
     ocr_status: str
@@ -76,6 +93,10 @@ class DocumentProcessingResponse(BaseModel):
     docling_status: str
 
     gemini_status: str
+
+    # --------------------------------------------------------
+    # Extracted Data
+    # --------------------------------------------------------
 
     ocr_text: Optional[str] = None
 

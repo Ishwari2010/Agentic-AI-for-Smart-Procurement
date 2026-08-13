@@ -72,6 +72,7 @@ Return ONLY valid JSON using exactly this structure:
     "requester_name": "",
     "address": "",
     "phone_number": "",
+
     "items": [
         {{
             "description": "",
@@ -79,117 +80,233 @@ Return ONLY valid JSON using exactly this structure:
             "estimated_cost": 0
         }}
     ],
+
+    "subtotal": 0,
+    "tax_amount": 0,
+    "tax_details": {{}},
     "total_estimated_cost": 0
 }}
 
 
 ============================================================
-IMPORTANT EXTRACTION RULES
+REQUESTER INFORMATION
 ============================================================
 
-1. Return ONLY valid JSON.
+1. Extract the requester/buyer name.
 
-2. Do not include markdown.
+2. Extract the requester/buyer's address when available.
 
-3. Do not include explanations.
+3. Extract the requester/buyer's phone number when available.
 
-4. Extract the requester/buyer name from the invoice.
+4. If the address is genuinely missing, return "".
 
-5. Extract the requester/buyer's address when available.
+5. If the phone number is genuinely missing, return "".
 
-6. Extract the requester/buyer's phone number when available.
+6. Preserve phone numbers as TEXT.
 
-7. If the address is genuinely missing, return "".
+7. Preserve country codes, + signs, leading zeros, and
+   meaningful formatting whenever possible.
 
-8. If the phone number is genuinely missing, return "".
+8. If both buyer/requester and vendor/supplier information
+   exist, do NOT confuse them.
 
-9. Preserve the phone number as TEXT.
-   Do not convert it into a numeric value.
-   Preserve country codes, + signs, leading zeros,
-   and other meaningful formatting when possible.
+9. Prefer the buyer/requester's information when the invoice
+   clearly distinguishes the buyer from the supplier.
 
-10. If the invoice contains both buyer/requester and
-    vendor/supplier information, do NOT confuse them.
 
-11. Extract the buyer/requester address and phone number,
-    not the vendor/supplier address and phone number,
-    when the invoice clearly identifies both separately.
+============================================================
+ITEM EXTRACTION
+============================================================
 
-12. Extract EVERY procurement item listed in the invoice.
+10. Extract EVERY procurement item listed in the invoice.
 
-13. For EACH item, preserve the relationship between:
+11. Preserve the relationship between:
+
     - description
     - quantity
     - unit price
     - amount
 
-14. IMPORTANT:
-    Do NOT treat table columns as independent lists.
+12. Do NOT treat table columns as independent lists.
 
-15. Use the table structure from Docling to help determine
-    row and column relationships.
+13. Use Docling's table structure to determine row and
+    column relationships.
 
-16. Use the Tesseract OCR text to recover text that may have
-    been missed or incorrectly represented by Docling.
+14. Use Tesseract OCR to recover information that Docling
+    may have missed or represented incorrectly.
 
-17. If Tesseract and Docling contain slightly different
-    representations of the same value, use the most
-    consistent interpretation based on the complete invoice.
+15. If Tesseract and Docling differ slightly, determine the
+    most consistent interpretation using the complete invoice.
 
-18. Do not invent information.
+16. Do not invent information.
 
-19. If a value is genuinely missing:
+17. Do not merge separate invoice items.
 
-    - Use "" for missing text.
-    - Use 0 for missing numeric values.
+18. Do not create items from:
 
-20. Quantity must be numeric.
-
-21. estimated_cost must be numeric.
-
-22. total_estimated_cost must be numeric.
-
-23. For each item, use the item's invoice amount as
-    estimated_cost when an amount is available.
-
-24. Do not confuse:
-
-    - subtotal
-    - tax
-    - GST
-    - CGST
-    - SGST
-    - total amount
-
-    with an individual item's estimated cost.
-
-25. If the invoice contains multiple items, return ALL
-    items in the "items" array.
-
-26. Do not merge separate invoice items into one item.
-
-27. Do not create items from:
-
-    - bank details
     - invoice numbers
     - dates
     - GST numbers
     - phone numbers
     - addresses
+    - bank details
+    - subtotal
+    - tax
+    - final total
     - other non-item information
 
-28. The final total should represent the invoice's final
-    total amount when clearly available.
+19. estimated_cost must be the amount associated with the
+    individual item.
 
-29. If the invoice has multiple items, make sure each item's
-    quantity and amount belong to the correct description.
+20. Never use subtotal, tax, GST, CGST, SGST, IGST, discount,
+    or final invoice total as an item's estimated_cost.
 
 
 ============================================================
-FINAL CHECK
+FINANCIAL EXTRACTION
 ============================================================
 
-Before returning the JSON, verify that:
+21. Extract the invoice subtotal separately.
+
+22. subtotal represents the sum of invoice item amounts before
+    applicable taxes, when clearly available.
+
+23. Extract the total tax amount separately.
+
+24. tax_amount must represent the combined amount of all
+    applicable taxes.
+
+25. Extract each individual tax component in tax_details.
+
+26. For example:
+
+    CGST = 1426.50
+    SGST = 1426.50
+
+    must produce:
+
+    "tax_amount": 2853.00,
+    "tax_details": {{
+        "CGST": 1426.50,
+        "SGST": 1426.50
+    }}
+
+27. For IGST:
+
+    "tax_amount": 2853.00,
+    "tax_details": {{
+        "IGST": 2853.00
+    }}
+
+28. If the invoice contains NO tax:
+
+    "tax_amount": 0,
+    "tax_details": {{}}
+
+29. Do NOT assume GST or any other tax.
+
+30. Only extract tax when it is actually present or clearly
+    stated on the invoice.
+
+31. Discounts, shipping charges, handling charges, and other
+    non-tax charges must NOT be included in tax_amount.
+
+32. total_estimated_cost must represent the FINAL PAYABLE
+    TOTAL shown on the invoice when clearly available.
+
+33. Do NOT confuse subtotal with final total.
+
+34. If taxes or other clearly stated charges make the final
+    amount different from the subtotal, use the final invoice
+    total for total_estimated_cost.
+
+35. If no explicit subtotal is shown but item amounts are
+    available, calculate subtotal from the item amounts.
+
+36. If no tax exists, tax_amount must be 0 and tax_details
+    must be an empty object.
+
+37. Do not invent subtotal, tax, or final-total values.
+
+
+============================================================
+TAX INVOICE EXAMPLE
+============================================================
+
+Items:
+
+Item A = 4500
+Item B = 3200
+Item C = 1900
+Item D = 6250
+
+Subtotal = 15850
+
+CGST = 1426.50
+SGST = 1426.50
+
+Final Total = 18703
+
+The correct output is:
+
+"subtotal": 15850,
+"tax_amount": 2853,
+"tax_details": {{
+    "CGST": 1426.50,
+    "SGST": 1426.50
+}},
+"total_estimated_cost": 18703
+
+
+============================================================
+NON-TAX INVOICE EXAMPLE
+============================================================
+
+Items:
+
+Item A = 5000
+Item B = 3000
+
+Subtotal = 8000
+
+No tax exists.
+
+Final Total = 8000
+
+The correct output is:
+
+"subtotal": 8000,
+"tax_amount": 0,
+"tax_details": {{}},
+"total_estimated_cost": 8000
+
+
+============================================================
+MISSING VALUE RULES
+============================================================
+
+38. Missing text → "".
+
+39. Missing numeric value → 0.
+
+40. quantity must be numeric.
+
+41. estimated_cost must be numeric.
+
+42. subtotal must be numeric.
+
+43. tax_amount must be numeric.
+
+44. tax_details must be a JSON object.
+
+45. total_estimated_cost must be numeric.
+
+
+============================================================
+FINAL VALIDATION
+============================================================
+
+Before returning the JSON, verify:
 
 - Requester name is correct.
 - Requester address is correct when available.
@@ -198,9 +315,15 @@ Before returning the JSON, verify that:
   information.
 - Every visible invoice item is represented.
 - Each quantity belongs to the correct item.
-- Each amount belongs to the correct item.
+- Each item amount belongs to the correct item.
+- Subtotal is separate from item amounts and taxes.
 - Taxes are not treated as item costs.
-- The final total is not confused with an item amount.
+- Individual tax components are represented in tax_details.
+- tax_amount equals the sum of individual tax components when
+  those components are available.
+- No tax is invented when the invoice has no tax.
+- total_estimated_cost represents the final payable amount.
+- Subtotal is not incorrectly used as the final total.
 - The JSON is syntactically valid.
 
 Return ONLY the JSON.
@@ -249,8 +372,7 @@ Return ONLY the JSON.
 
         print("Gemini Error:", e)
 
-        # IMPORTANT:
-        # Propagate the error so llm_client.py can mark
-        # processing as failed.
+        # Propagate the error so the processing pipeline
+        # can mark the extraction as failed.
 
         raise

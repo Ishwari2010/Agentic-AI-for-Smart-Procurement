@@ -38,68 +38,52 @@ function DocumentIntelligence() {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         const response = await axios.get(
-          `${API_URL}/documents/${id}`
+          `${API_URL}/processing/${id}?t=${Date.now()}`,
+          {
+            headers: {
+              "Cache-Control": "no-cache",
+              Pragma: "no-cache",
+            },
+          }
         );
 
         const data = response.data;
 
-        console.log("Processing status:", data);
+        console.log("PROCESSING STATUS:", data);
 
         setResult(data);
 
-        // ----------------------------------------------------
-        // Processing completed
-        // ----------------------------------------------------
-
         if (data.status === "completed") {
+          console.log("PROCESSING COMPLETED:", data);
           setProcessing(false);
           return;
         }
 
-        // ----------------------------------------------------
-        // Processing failed
-        // ----------------------------------------------------
-
         if (data.status === "failed") {
+          console.error("PROCESSING FAILED:", data);
           setProcessing(false);
-
           setError(
             data.error_message ||
               "Invoice processing failed."
           );
-
           return;
         }
-
-        // ----------------------------------------------------
-        // Still processing
-        // ----------------------------------------------------
 
         await new Promise((resolve) =>
           setTimeout(resolve, 2000)
         );
       } catch (err) {
-        console.error(
-          "Status polling error:",
-          err
-        );
-
+        console.error("Status polling error:", err);
         setProcessing(false);
-
         setError(
-          "Could not retrieve invoice processing status."
+          err.response?.data?.detail ||
+            "Could not retrieve invoice processing status."
         );
-
         return;
       }
     }
 
-    // --------------------------------------------------------
-    // Timeout
-    // --------------------------------------------------------
-
     setProcessing(false);
-
     setError(
       "Invoice processing is taking too long. Please check the Logs or try again."
     );
@@ -224,7 +208,14 @@ function DocumentIntelligence() {
     return selectedFile !== null;
   };
 
-  const isQueued = () => {
+  // MinIO stores the original uploaded document.
+  // The upload endpoint only returns after the file has been accepted
+  // and queued, so a selected/processed file is treated as stored.
+  const isMinIOCompleted = () => {
+    return selectedFile !== null && result !== null;
+  };
+
+  const isKafkaCompleted = () => {
     return (
       result &&
       (
@@ -234,6 +225,8 @@ function DocumentIntelligence() {
       )
     );
   };
+
+  const isQueued = isKafkaCompleted;
 
   const isOCRCompleted = () => {
     return (
@@ -448,7 +441,7 @@ function DocumentIntelligence() {
             </h3>
 
             <p>
-              Current invoice processing pipeline
+              Current invoice processing pipeline: MinIO → Kafka → OCR → Docling → AI → PostgreSQL
             </p>
 
           </div>
@@ -495,11 +488,11 @@ function DocumentIntelligence() {
           <div className="pipeline-line"></div>
 
 
-          {/* STEP 2 — QUEUED */}
+          {/* STEP 2 — MINIO STORAGE */}
 
           <div
             className={`pipeline-step ${
-              isQueued()
+              isMinIOCompleted()
                 ? "completed"
                 : ""
             }`}
@@ -507,7 +500,7 @@ function DocumentIntelligence() {
 
             <div className="step-circle">
 
-              {isQueued()
+              {isMinIOCompleted()
                 ? "✓"
                 : "2"}
 
@@ -516,11 +509,47 @@ function DocumentIntelligence() {
             <div>
 
               <strong>
-                Queued
+                MinIO Storage
               </strong>
 
               <span>
-                Waiting in Kafka
+                Original document stored
+              </span>
+
+            </div>
+
+          </div>
+
+
+          <div className="pipeline-line"></div>
+
+
+          {/* STEP 3 — KAFKA */}
+
+          <div
+            className={`pipeline-step ${
+              isKafkaCompleted()
+                ? "completed"
+                : ""
+            }`}
+          >
+
+            <div className="step-circle">
+
+              {isKafkaCompleted()
+                ? "✓"
+                : "3"}
+
+            </div>
+
+            <div>
+
+              <strong>
+                Kafka
+              </strong>
+
+              <span>
+                Processing event queued
               </span>
 
             </div>
@@ -545,7 +574,7 @@ function DocumentIntelligence() {
 
               {isOCRCompleted()
                 ? "✓"
-                : "3"}
+                : "4"}
 
             </div>
 
@@ -581,7 +610,7 @@ function DocumentIntelligence() {
 
               {isDoclingCompleted()
                 ? "✓"
-                : "4"}
+                : "5"}
 
             </div>
 
@@ -617,7 +646,7 @@ function DocumentIntelligence() {
 
               {isGeminiCompleted()
                 ? "✓"
-                : "5"}
+                : "6"}
 
             </div>
 
@@ -651,7 +680,7 @@ function DocumentIntelligence() {
 
               {isDatabaseCompleted()
                 ? "✓"
-                : "6"}
+                : "7"}
 
             </div>
 
@@ -850,6 +879,21 @@ function DocumentIntelligence() {
                   </p>
 
                 </div>
+
+
+                {result && (
+
+                  <div>
+
+                    <span className="activity-dot"></span>
+
+                    <p>
+                      Original document stored in MinIO
+                    </p>
+
+                  </div>
+
+                )}
 
 
                 {result.status !== "queued" && (

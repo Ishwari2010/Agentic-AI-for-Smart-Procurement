@@ -7,15 +7,17 @@ from fastapi import (
 )
 
 from fastapi.middleware.cors import CORSMiddleware
-
 from sqlalchemy.orm import Session
 
 import os
-import shutil
 
 from .database import SessionLocal
 from . import crud, schemas
 from .kafka_producer import publish_invoice_event
+from .minio_client import (
+    ensure_bucket_exists,
+    upload_file
+)
 
 
 # ============================================================
@@ -35,29 +37,13 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173"
     ],
-
     allow_credentials=True,
-
     allow_methods=["*"],
-
     allow_headers=["*"]
-)
-
-
-# ============================================================
-# Upload Folder
-# ============================================================
-
-UPLOAD_FOLDER = "uploads"
-
-os.makedirs(
-    UPLOAD_FOLDER,
-    exist_ok=True
 )
 
 
@@ -66,7 +52,6 @@ os.makedirs(
 # ============================================================
 
 def get_db():
-
     db = SessionLocal()
 
     try:
@@ -77,16 +62,35 @@ def get_db():
 
 
 # ============================================================
+# Startup
+# ============================================================
+
+@app.on_event("startup")
+def startup_event():
+    try:
+        ensure_bucket_exists()
+
+        print(
+            "MinIO connection initialized successfully."
+        )
+
+    except Exception as e:
+        # Do not stop FastAPI from starting.
+        # The upload endpoint will report the actual MinIO error.
+        print(
+            f"WARNING: MinIO initialization failed: {e}"
+        )
+
+
+# ============================================================
 # Home
 # ============================================================
 
 @app.get("/")
 def home():
-
     return {
         "message":
             "Agentic AI Smart Procurement Backend Running Successfully!",
-
         "status":
             "online"
     }
@@ -97,10 +101,11 @@ def home():
 # ============================================================
 
 @app.post("/upload")
-async def upload_file(
+async def upload_file_endpoint(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
+    processing = None
 
     try:
 
@@ -109,7 +114,6 @@ async def upload_file(
         # ----------------------------------------------------
 
         if not file.filename:
-
             raise HTTPException(
                 status_code=400,
                 detail="No file provided"
@@ -120,7 +124,7 @@ async def upload_file(
         # Validate file type
         # ----------------------------------------------------
 
-        ALLOWED_EXTENSIONS = {
+        allowed_extensions = {
             ".pdf",
             ".png",
             ".jpg",
@@ -131,9 +135,7 @@ async def upload_file(
             file.filename
         )[1].lower()
 
-
-        if file_extension not in ALLOWED_EXTENSIONS:
-
+        if file_extension not in allowed_extensions:
             raise HTTPException(
                 status_code=400,
                 detail=(
@@ -144,36 +146,97 @@ async def upload_file(
 
 
         # ----------------------------------------------------
-        # Save file
+        # Read uploaded file
         # ----------------------------------------------------
 
-        file_path = os.path.join(
-            UPLOAD_FOLDER,
-            file.filename
+        file_data = await file.read()
+
+        if not file_data:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded file is empty"
+            )
+
+
+        # ----------------------------------------------------
+        # Create processing record
+        #
+        # We create it first because the processing ID is used
+        # in the MinIO object name.
+        # ----------------------------------------------------
+
+        processing = crud.create_document_processing(
+            db=db,
+            filename=file.filename,
+            file_path=""
         )
 
 
-        with open(
-            file_path,
-            "wb"
-        ) as buffer:
+        # ----------------------------------------------------
+        # Create MinIO object name
+        # ----------------------------------------------------
 
-            shutil.copyfileobj(
-                file.file,
-                buffer
+        object_name = (
+            f"invoices/"
+            f"{processing.id}_"
+            f"{file.filename}"
+        )
+
+
+        # ----------------------------------------------------
+        # Upload original document to MinIO
+        # ----------------------------------------------------
+
+        try:
+
+            upload_file(
+                file_data=file_data,
+                object_name=object_name,
+                content_type=(
+                    file.content_type
+                    or "application/octet-stream"
+                )
+            )
+
+        except Exception as minio_error:
+
+            # Record MinIO failure in PostgreSQL
+            try:
+                crud.update_minio_status(
+                    db=db,
+                    processing_id=processing.id,
+                    status="failed",
+                    object_name=None
+                )
+            except Exception:
+                db.rollback()
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"MinIO upload failed: {str(minio_error)}"
+                )
             )
 
 
         # ----------------------------------------------------
-        # Create document processing record
+        # Update MinIO tracking information
         # ----------------------------------------------------
 
-        processing = (
-            crud.create_document_processing(
-                db=db,
-                filename=file.filename,
-                file_path=file_path
-            )
+        processing.file_path = object_name
+
+        # This requires update_minio_status() in crud.py.
+        crud.update_minio_status(
+            db=db,
+            processing_id=processing.id,
+            status="completed",
+            object_name=object_name
+        )
+
+        # Refresh after the CRUD update
+        processing = crud.get_document_processing(
+            db=db,
+            processing_id=processing.id
         )
 
 
@@ -181,16 +244,31 @@ async def upload_file(
         # Publish Kafka event
         # ----------------------------------------------------
 
-        kafka_event = (
-            publish_invoice_event(
+        try:
 
+            kafka_event = publish_invoice_event(
                 processing_id=processing.id,
-
                 filename=file.filename,
-
-                file_path=file_path
+                file_path=object_name
             )
-        )
+
+        except Exception as kafka_error:
+
+            # MinIO succeeded, but Kafka failed.
+            # Keep the MinIO record because the document is safely stored.
+            crud.update_processing_status(
+                db=db,
+                processing_id=processing.id,
+                status="failed"
+            )
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Kafka event publishing failed: "
+                    f"{str(kafka_error)}"
+                )
+            )
 
 
         # ----------------------------------------------------
@@ -198,9 +276,8 @@ async def upload_file(
         # ----------------------------------------------------
 
         return {
-
             "message":
-                "Invoice uploaded and queued for processing",
+                "Invoice uploaded to MinIO and queued for processing",
 
             "processing_id":
                 processing.id,
@@ -211,6 +288,21 @@ async def upload_file(
             "status":
                 "queued",
 
+            "minio_status":
+                processing.minio_status,
+
+            "storage":
+                "MinIO",
+
+            "bucket":
+                "procurement-documents",
+
+            "minio_object_name":
+                processing.minio_object_name,
+
+            "object_name":
+                object_name,
+
             "kafka_topic":
                 "invoice-topic",
 
@@ -220,16 +312,15 @@ async def upload_file(
 
 
     except HTTPException:
-
         raise
 
 
     except Exception as e:
 
+        db.rollback()
+
         raise HTTPException(
-
             status_code=500,
-
             detail=(
                 f"Invoice upload failed: {str(e)}"
             )
@@ -245,31 +336,23 @@ async def upload_file(
     response_model=schemas.DocumentProcessingResponse
 )
 def get_processing_result(
-
     processing_id: int,
-
     db: Session = Depends(get_db)
 ):
 
-    processing = (
-        crud.get_document_processing(
-            db,
-            processing_id
-        )
+    processing = crud.get_document_processing(
+        db,
+        processing_id
     )
 
-
     if not processing:
-
         raise HTTPException(
-
             status_code=404,
-
             detail="Processing record not found"
         )
 
-
     return processing
+
 
 # ============================================================
 # Document History
@@ -279,6 +362,7 @@ def get_processing_result(
 def get_documents(
     db: Session = Depends(get_db)
 ):
+
     documents = crud.get_all_document_processing(db)
 
     return [
@@ -286,10 +370,15 @@ def get_documents(
             "id": document.id,
             "filename": document.filename,
             "file_path": document.file_path,
+
+            "minio_status": document.minio_status,
+            "minio_object_name": document.minio_object_name,
+
             "status": document.status,
             "ocr_status": document.ocr_status,
             "docling_status": document.docling_status,
             "gemini_status": document.gemini_status,
+
             "request_id": document.request_id,
             "created_at": document.created_at,
             "error_message": document.error_message
@@ -307,6 +396,7 @@ def get_document_details(
     processing_id: int,
     db: Session = Depends(get_db)
 ):
+
     document = crud.get_document_processing(
         db,
         processing_id
@@ -319,19 +409,50 @@ def get_document_details(
         )
 
     return {
-        "id": document.id,
-        "filename": document.filename,
-        "file_path": document.file_path,
-        "status": document.status,
-        "ocr_status": document.ocr_status,
-        "docling_status": document.docling_status,
-        "gemini_status": document.gemini_status,
-        "ocr_text": document.ocr_text,
-        "structured_data": document.structured_data,
-        "request_id": document.request_id,
-        "error_message": document.error_message,
-        "created_at": document.created_at,
-        "updated_at": document.updated_at
+        "id":
+            document.id,
+
+        "filename":
+            document.filename,
+
+        "file_path":
+            document.file_path,
+
+        "minio_status":
+            document.minio_status,
+
+        "minio_object_name":
+            document.minio_object_name,
+
+        "status":
+            document.status,
+
+        "ocr_status":
+            document.ocr_status,
+
+        "docling_status":
+            document.docling_status,
+
+        "gemini_status":
+            document.gemini_status,
+
+        "ocr_text":
+            document.ocr_text,
+
+        "structured_data":
+            document.structured_data,
+
+        "request_id":
+            document.request_id,
+
+        "error_message":
+            document.error_message,
+
+        "created_at":
+            document.created_at,
+
+        "updated_at":
+            document.updated_at
     }
 
 
@@ -344,6 +465,7 @@ def delete_document(
     processing_id: int,
     db: Session = Depends(get_db)
 ):
+
     document = crud.get_document_processing(
         db,
         processing_id
@@ -361,9 +483,14 @@ def delete_document(
     )
 
     return {
-        "message": "Document deleted successfully",
-        "processing_id": deleted.id,
-        "filename": deleted.filename
+        "message":
+            "Document deleted successfully",
+
+        "processing_id":
+            deleted.id,
+
+        "filename":
+            deleted.filename
     }
 
 
@@ -376,6 +503,7 @@ def reprocess_document(
     processing_id: int,
     db: Session = Depends(get_db)
 ):
+
     document = crud.get_document_processing(
         db,
         processing_id
@@ -387,30 +515,119 @@ def reprocess_document(
             detail="Document not found"
         )
 
-    if not os.path.exists(document.file_path):
+
+    # --------------------------------------------------------
+    # Keep the existing MinIO object information
+    # --------------------------------------------------------
+
+    object_name = (
+        document.minio_object_name
+        or document.file_path
+    )
+
+    if not object_name:
         raise HTTPException(
             status_code=404,
-            detail="Original document file not found"
+            detail="Original document not found in MinIO"
         )
 
+
+    # --------------------------------------------------------
     # Reset processing information
+    # --------------------------------------------------------
+
     processing = crud.reset_document_processing(
         db,
         processing_id
     )
 
-    # Publish the document to Kafka again
-    kafka_event = publish_invoice_event(
+    if not processing:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found"
+        )
+
+
+    # --------------------------------------------------------
+    # MinIO object already exists.
+    # Keep it marked as completed.
+    # --------------------------------------------------------
+
+    processing.file_path = object_name
+
+    crud.update_minio_status(
+        db=db,
         processing_id=processing.id,
-        filename=processing.filename,
-        file_path=processing.file_path
+        status="completed",
+        object_name=object_name
     )
 
+    processing = crud.get_document_processing(
+        db=db,
+        processing_id=processing.id
+    )
+
+
+    # --------------------------------------------------------
+    # Publish document to Kafka again
+    # --------------------------------------------------------
+
+    try:
+
+        kafka_event = publish_invoice_event(
+            processing_id=processing.id,
+            filename=processing.filename,
+            file_path=object_name
+        )
+
+    except Exception as kafka_error:
+
+        crud.update_processing_status(
+            db=db,
+            processing_id=processing.id,
+            status="failed"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Kafka event publishing failed: "
+                f"{str(kafka_error)}"
+            )
+        )
+
+
     return {
-        "message": "Document queued for reprocessing",
-        "processing_id": processing.id,
-        "filename": processing.filename,
-        "status": "queued",
-        "kafka_topic": "invoice-topic",
-        "event": kafka_event
+        "message":
+            "Document queued for reprocessing",
+
+        "processing_id":
+            processing.id,
+
+        "filename":
+            processing.filename,
+
+        "status":
+            "queued",
+
+        "minio_status":
+            processing.minio_status,
+
+        "storage":
+            "MinIO",
+
+        "bucket":
+            "procurement-documents",
+
+        "minio_object_name":
+            processing.minio_object_name,
+
+        "object_name":
+            object_name,
+
+        "kafka_topic":
+            "invoice-topic",
+
+        "event":
+            kafka_event
     }

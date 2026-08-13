@@ -10,7 +10,6 @@ from sqlalchemy import (
     text
 )
 
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -35,7 +34,7 @@ class ProcurementRequest(Base):
     )
 
     address = Column(
-        Text,
+        String(500),
         nullable=True
     )
 
@@ -44,6 +43,17 @@ class ProcurementRequest(Base):
         nullable=True
     )
 
+    # IMPORTANT:
+    # This is the FINAL invoice total extracted by Groq/Gemini.
+    #
+    # It may include:
+    # - GST / taxes
+    # - discounts
+    # - shipping charges
+    # - other invoice-level charges
+    # - rounding
+    #
+    # It must NOT be recalculated from item costs.
     total_estimated_cost = Column(
         Numeric(12, 2),
         nullable=False
@@ -93,6 +103,10 @@ class ProcurementItem(Base):
         nullable=False
     )
 
+    # Cost of this individual item.
+    #
+    # IMPORTANT:
+    # This is NOT necessarily the final invoice total.
     estimated_cost = Column(
         Numeric(12, 2),
         nullable=False
@@ -122,10 +136,33 @@ class DocumentProcessing(Base):
         nullable=False
     )
 
+    # --------------------------------------------------------
+    # MinIO
+    # --------------------------------------------------------
+
+    minio_status = Column(
+        String(50),
+        nullable=False,
+        default="pending"
+    )
+
+    minio_object_name = Column(
+        String(500),
+        nullable=True
+    )
+
+    # --------------------------------------------------------
+    # Original file information
+    # --------------------------------------------------------
+
     file_path = Column(
         String(500),
         nullable=False
     )
+
+    # --------------------------------------------------------
+    # Processing status
+    # --------------------------------------------------------
 
     status = Column(
         String(50),
@@ -151,6 +188,10 @@ class DocumentProcessing(Base):
         default="pending"
     )
 
+    # --------------------------------------------------------
+    # Extracted data
+    # --------------------------------------------------------
+
     ocr_text = Column(
         Text,
         nullable=True
@@ -161,6 +202,10 @@ class DocumentProcessing(Base):
         nullable=True
     )
 
+    # --------------------------------------------------------
+    # Link to procurement request
+    # --------------------------------------------------------
+
     request_id = Column(
         Integer,
         ForeignKey(
@@ -169,10 +214,18 @@ class DocumentProcessing(Base):
         nullable=True
     )
 
+    # --------------------------------------------------------
+    # Error tracking
+    # --------------------------------------------------------
+
     error_message = Column(
         Text,
         nullable=True
     )
+
+    # --------------------------------------------------------
+    # Timestamps
+    # --------------------------------------------------------
 
     created_at = Column(
         TIMESTAMP,
